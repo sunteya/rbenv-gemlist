@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+
+gems_file="installed.gems"
+
+error_log() {
+	printf "%b" "\E[31m$*\E[0m\n" >&2
+}
+
+info_log() {
+	printf "%b" "\E[32m$*\E[0m\n"
+}
+
+__list_gems() {
+	gem list --quiet | sed '/\*\*\*/ d ; /^$/ d; s/ (/,/; s/, /,/g; s/)//;' | awk -F ',' '{for(i=2;i<=NF;i++) print $1" "$i }'
+}
+
+gemset_export() {
+	echo "" > $gems_file
+	while read gem_name version _platforms; do
+		echo "$gem_name -v$version"
+	done < <( __list_gems ) >> $gems_file
+}
+
+__read_lines() {
+	typeset IFS
+	# NEW LINE, BE CAREFUL
+	IFS="
+"
+	eval "$1=( \$( \cat \"\${2}\" ) )"
+}
+
+gemset_import() {
+	__read_lines lines "${gems_file}"
+
+	if (( ${#lines[@]} )); then
+		gemset_import_list "${lines[@]}"
+	fi
+}
+
+
+gemset_import_list() {
+	typeset line
+	for line; do
+		gem_install $line || error_log "there was an error installing gem $line"
+	done
+}
+
+is_gem_installed() {
+	typeset gem_spec
+	gem_spec="gem '$gem_name'"
+	if [[ -n "${gem_version}" ]]; then
+		gem_spec+=", '$gem_version'"
+	fi
+
+	echo $gem_spec | ruby 2>/dev/null || return $?
+}
+
+gem_install() {
+	typeset gem="$*"
+	gem_name="${gem/ */}"
+	gem_version=
+
+	case "$gem" in
+		*--version*)
+			gem_version=$(echo "$gem" | sed -e 's#.*--version[=]*[ ]*##' | awk '{print $1}')
+			;;
+		*-v*)
+			gem_version=$(echo "$gem" | sed -e 's#.*-v[=]*[ ]*##' | awk '{print $1}')
+			;;
+	esac
+
+	if is_gem_installed; then
+		info_log "gem ${gem_name} ${gem_version:-} is already installed"
+		return 0
+	else
+		gem_install_force || return $?
+	fi
+	true # for OSX
+}
+
+gem_install_force() {
+	typeset __available_gem
+	typeset -a install_params
+
+	install_params=()
+	# __available_gem="$( ls -v1 "${rvm_path}/gem-cache"/${gem_name}-${version_check}.gem 2>/dev/null | tail -n 1 )"
+
+	if [[ -z "${__available_gem}" && -n "${gem_version}" ]]; then
+		install_params+=( -v "${gem_version}" )
+	fi
+
+	info_log "installing gem ${__available_gem:-${gem_name}} ${install_params[*]}"
+	__run_command gem install "${__available_gem:-${gem_name}}" "${install_params[@]}" || return $?
+}
+
+
+__run_command() {
+	typeset _command_start
+	typeset -a _command
+
+	_command=( "$@" )
+	_command_start="$1"
+	[[ ! "${_command_start}" =~ "=" ]] || _command=( "env" "${_command[@]}" )
+
+	{ errout=$("$@"  2>&1 1>&3-) ;} 3>&1 || return $?
+}
+
+usage(){
+	echo "Usage: rbenv gemlist <export|import>"
+	echo "   export     export installed gem info to file '$gems_file'"
+	echo "   import     install all gem from file '$gems_file'"
+}
+
+command=${1:-usage}
+shift
+case "$command" in
+	export) gemset_export $@ ;;
+	import) gemset_import $@ ;;
+	*) usage ;;
+esac
