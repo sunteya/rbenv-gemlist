@@ -41,6 +41,7 @@ gemset_import() {
 gemset_import_list() {
 	typeset line
 	for line; do
+		echo "$line" | grep -e "^#" >/dev/null && continue
 		gem_install $line || error_log "there was an error installing gem $line"
 	done
 }
@@ -109,6 +110,7 @@ usage(){
 	echo "Usage: rbenv gemlist <export|import>"
 	echo "   export     export installed gem info to file '$gems_file'"
 	echo "   import     install all gem from file '$gems_file'"
+	echo 
 }
 
 command=${1:-usage}
